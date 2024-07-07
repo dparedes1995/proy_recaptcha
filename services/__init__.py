@@ -1,0 +1,1 @@
+from .recaptcha_solver import solve_recaptcha
