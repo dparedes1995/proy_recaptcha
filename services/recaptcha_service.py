@@ -1,9 +1,12 @@
 import logging
-
 from playwright.async_api import async_playwright
-
-from services.interactions.browser_interaction import find_recaptcha_iframe, is_checkbox_checked, \
-    find_challenge_iframe, get_audio_download_url, recognize_audio
+from services.interactions.browser_interaction import (
+    find_recaptcha_iframe,
+    is_checkbox_checked,
+    find_challenge_iframe,
+    get_audio_download_url,
+    recognize_audio
+)
 from utils.human_emulator import emulate_human_behavior, type_like_a_human, click_randomly_within_element
 from utils.config import (
     USER_AGENT,
@@ -11,8 +14,7 @@ from utils.config import (
     RECAPTCHA_CHECKBOX_SELECTOR,
     RECAPTCHA_AUDIO_BUTTON_SELECTOR,
     RECAPTCHA_VERIFY_BUTTON_SELECTOR,
-    AUDIO_RESPONSE_INPUT_SELECTOR,
-    VERIFY_BUTTON_SELECTOR
+    AUDIO_RESPONSE_INPUT_SELECTOR
 )
 
 
@@ -27,63 +29,41 @@ async def submit_recaptcha_solution(page, challenge_iframe, response_text: str):
 
 async def handle_recaptcha(page):
     logging.info("[handle_recaptcha] Iniciando.")
-    recaptcha_iframe = await find_recaptcha_iframe(page)
-    if not recaptcha_iframe:
-        logging.error("[handle_recaptcha] No se encontró el iframe del reCAPTCHA.")
-        return False
 
+    recaptcha_iframe = await find_recaptcha_iframe(page)
     await emulate_human_behavior(page)
     checkbox = await recaptcha_iframe.wait_for_selector(RECAPTCHA_CHECKBOX_SELECTOR)
     await click_randomly_within_element(page, checkbox)
 
     if await is_checkbox_checked(recaptcha_iframe):
-        logging.info("[handle_recaptcha] Checkbox ya está marcado, no es necesario realizar el desafío de audio.")
-        return True
+        logging.info("[handle_recaptcha] Checkbox ya está marcado.")
+        return
 
     await emulate_human_behavior(page)
     challenge_iframe = await find_challenge_iframe(page)
-    if not challenge_iframe:
-        logging.error("[handle_recaptcha] No se encontró el iframe del desafío de audio.")
-        return False
-
     await emulate_human_behavior(page)
     audio_button = await challenge_iframe.wait_for_selector(RECAPTCHA_AUDIO_BUTTON_SELECTOR)
     await click_randomly_within_element(page, audio_button)
 
     await emulate_human_behavior(page)
-    button = await challenge_iframe.wait_for_selector(VERIFY_BUTTON_SELECTOR, timeout=10000)
-    await click_randomly_within_element(page, button)
-
-    await emulate_human_behavior(page)
     audio_url = await get_audio_download_url(challenge_iframe)
-    if not audio_url:
-        logging.error("[handle_recaptcha] No se pudo obtener la URL de descarga del audio.")
-        return False
-
     await emulate_human_behavior(page)
     response_text = await recognize_audio(audio_url)
-    if not response_text:
-        logging.error("[handle_recaptcha] No se pudo reconocer el audio.")
-        return False
-
     await emulate_human_behavior(page)
     await submit_recaptcha_solution(page, challenge_iframe, response_text)
 
     await emulate_human_behavior(page)
     if not await is_checkbox_checked(recaptcha_iframe):
-        logging.error("[handle_recaptcha] Falló el manejo del reCAPTCHA.")
-        return False
+        raise Exception("Falló el manejo del reCAPTCHA.")
 
     logging.info("[handle_recaptcha] Completado.")
-    await emulate_human_behavior(page)
-    return True
 
 
 async def solve_recaptcha(url):
     logging.info(f"[solve_recaptcha] Iniciando proceso para resolver reCAPTCHA en {url}.")
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, args=[
+            browser = await p.chromium.launch(headless=True, args=[
                 '--disable-blink-features=AutomationControlled',
                 '--disable-infobars'
             ])
@@ -94,10 +74,10 @@ async def solve_recaptcha(url):
             page = await context.new_page()
 
             await page.add_init_script("""
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => undefined
-                        });
-                    """)
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
             logging.info("[solve_recaptcha] Propiedades de automatización eliminadas.")
 
             await page.goto(url)
@@ -105,12 +85,13 @@ async def solve_recaptcha(url):
 
             await emulate_human_behavior(page)
 
-            success = await handle_recaptcha(page)
-            if success:
+            try:
+                await handle_recaptcha(page)
                 logging.info("[solve_recaptcha] El reCAPTCHA fue resuelto exitosamente.")
-            else:
-                logging.error("[solve_recaptcha] Falló la resolución del reCAPTCHA.")
-            return success
+                return True
+            except Exception as e:
+                logging.error(f"[solve_recaptcha] Error en el manejo del reCAPTCHA: {str(e)}")
+                return False
     except Exception as e:
         logging.error(f"[solve_recaptcha] Error al resolver reCAPTCHA: {str(e)}")
         return False
