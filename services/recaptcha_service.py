@@ -1,140 +1,116 @@
-import asyncio
 import logging
 
 from playwright.async_api import async_playwright
+
+from services.interactions.browser_interaction import find_recaptcha_iframe, is_checkbox_checked, \
+    find_challenge_iframe, get_audio_download_url, recognize_audio
 from utils.human_emulator import emulate_human_behavior, type_like_a_human, click_randomly_within_element
-from utils.speech_recognition import recognize_speech_from_url
+from utils.config import (
+    USER_AGENT,
+    VIEWPORT,
+    RECAPTCHA_CHECKBOX_SELECTOR,
+    RECAPTCHA_AUDIO_BUTTON_SELECTOR,
+    RECAPTCHA_VERIFY_BUTTON_SELECTOR,
+    AUDIO_RESPONSE_INPUT_SELECTOR,
+    VERIFY_BUTTON_SELECTOR
+)
 
 
-class RecaptchaService:
+async def submit_recaptcha_solution(page, challenge_iframe, response_text: str):
+    logging.info("[submit_recaptcha_solution] Iniciando.")
+    await emulate_human_behavior(page)
+    await type_like_a_human(challenge_iframe, AUDIO_RESPONSE_INPUT_SELECTOR, response_text)
+    await emulate_human_behavior(page)
+    await challenge_iframe.click(RECAPTCHA_VERIFY_BUTTON_SELECTOR)
+    logging.info("[submit_recaptcha_solution] Completado.")
 
-    async def get_main_frame(self, page):
-        logging.info("Buscando el primer iframe del reCAPTCHA")
-        main_frame = await page.wait_for_selector("iframe[title*='reCAPTCHA']", state="attached")
-        if main_frame:
-            return await main_frame.content_frame()
-        logging.error("Iframe principal del reCAPTCHA no encontrado")
-        return None
 
-    async def click_recaptcha_checkbox(self, page_main_frame):
-        logging.info("Esperando y haciendo clic en el checkbox de reCAPTCHA")
-        await page_main_frame.click('.recaptcha-checkbox-border')
-        logging.info("Checkbox clickeado")
-
-    async def is_checkbox_checked(self, page_main_frame):
-        logging.info("Validando el estado del checkbox")
-        return await page_main_frame.evaluate(
-            '() => document.querySelector(".recaptcha-checkbox").getAttribute("aria-checked")') == "true"
-
-    async def get_challenge_frame(self, page):
-        logging.info("Esperando a que aparezca el iframe del desafío de audio")
-        await asyncio.sleep(5)
-        challenge_frame = await page.wait_for_selector("iframe[title='recaptcha challenge expires in two minutes']",
-                                                       state="attached")
-        if challenge_frame:
-            return await challenge_frame.content_frame()
-        logging.error("Iframe del desafío de audio no encontrado después de activar el checkbox")
-        return None
-
-    async def get_audio_url(self, page_challenge_frame):
-        logging.info("Esperando que el enlace de descarga del audio sea visible")
-        return await page_challenge_frame.evaluate(
-            "() => document.querySelector('a.rc-audiochallenge-tdownload-link').href")
-
-    async def recognize_audio_challenge(self, audio_url):
-        return await recognize_speech_from_url(audio_url)
-
-    async def submit_recaptcha_response(self, page, page_challenge_frame, response_text: str):
-        try:
-            await emulate_human_behavior(page)
-            logging.info("Ingresando texto reconocido en el campo de entrada")
-            await type_like_a_human(page_challenge_frame, 'input#audio-response', response_text)
-            logging.info("Texto ingresado")
-
-            await emulate_human_behavior(page)
-            logging.info("Haciendo clic en el botón de verificar")
-            await page_challenge_frame.click('button#recaptcha-verify-button')
-            logging.info("Clic en verificar realizado")
-            return True
-        except Exception as e:
-            logging.error(f"Error al enviar respuesta de reCAPTCHA: {str(e)}")
-            return False
-
-    async def interact_with_recaptcha(self, page):
-        try:
-            page_main_frame = await self.get_main_frame(page)
-            if not page_main_frame:
-                return False
-
-            await emulate_human_behavior(page)
-            checkbox = await page_main_frame.wait_for_selector('.recaptcha-checkbox-border')
-            await click_randomly_within_element(page, checkbox)
-
-            if await self.is_checkbox_checked(page_main_frame):
-                logging.info("Checkbox ya está marcado, no es necesario realizar el desafío de audio")
-                return True
-
-            await emulate_human_behavior(page)
-            page_challenge_frame = await self.get_challenge_frame(page)
-            if not page_challenge_frame:
-                return False
-
-            audio_button = await page_challenge_frame.wait_for_selector('#recaptcha-audio-button')
-            await click_randomly_within_element(page, audio_button)
-            await emulate_human_behavior(page)
-            button = await page_challenge_frame.wait_for_selector('.rc-button-default.goog-inline-block',
-                                                              timeout=10000)
-            await click_randomly_within_element(page, button)
-            await emulate_human_behavior(page)
-            audio_url = await self.get_audio_url(page_challenge_frame)
-            if audio_url:
-                await emulate_human_behavior(page)
-                response_text = await self.recognize_audio_challenge(audio_url)
-                if response_text:
-                    await emulate_human_behavior(page)
-                    return await self.submit_recaptcha_response(page, page_challenge_frame, response_text)
-
-        except Exception as e:
-            logging.error(f"Error al interactuar con reCAPTCHA: {str(e)}")
-            return False
-
+async def handle_recaptcha(page):
+    logging.info("[handle_recaptcha] Iniciando.")
+    recaptcha_iframe = await find_recaptcha_iframe(page)
+    if not recaptcha_iframe:
+        logging.error("[handle_recaptcha] No se encontró el iframe del reCAPTCHA.")
         return False
 
-    async def solve_recaptcha(self, url):
+    await emulate_human_behavior(page)
+    checkbox = await recaptcha_iframe.wait_for_selector(RECAPTCHA_CHECKBOX_SELECTOR)
+    await click_randomly_within_element(page, checkbox)
+
+    if await is_checkbox_checked(recaptcha_iframe):
+        logging.info("[handle_recaptcha] Checkbox ya está marcado, no es necesario realizar el desafío de audio.")
+        return True
+
+    await emulate_human_behavior(page)
+    challenge_iframe = await find_challenge_iframe(page)
+    if not challenge_iframe:
+        logging.error("[handle_recaptcha] No se encontró el iframe del desafío de audio.")
+        return False
+
+    await emulate_human_behavior(page)
+    audio_button = await challenge_iframe.wait_for_selector(RECAPTCHA_AUDIO_BUTTON_SELECTOR)
+    await click_randomly_within_element(page, audio_button)
+
+    await emulate_human_behavior(page)
+    button = await challenge_iframe.wait_for_selector(VERIFY_BUTTON_SELECTOR, timeout=10000)
+    await click_randomly_within_element(page, button)
+
+    await emulate_human_behavior(page)
+    audio_url = await get_audio_download_url(challenge_iframe)
+    if not audio_url:
+        logging.error("[handle_recaptcha] No se pudo obtener la URL de descarga del audio.")
+        return False
+
+    await emulate_human_behavior(page)
+    response_text = await recognize_audio(audio_url)
+    if not response_text:
+        logging.error("[handle_recaptcha] No se pudo reconocer el audio.")
+        return False
+
+    await emulate_human_behavior(page)
+    await submit_recaptcha_solution(page, challenge_iframe, response_text)
+
+    await emulate_human_behavior(page)
+    if not await is_checkbox_checked(recaptcha_iframe):
+        logging.error("[handle_recaptcha] Falló el manejo del reCAPTCHA.")
+        return False
+
+    logging.info("[handle_recaptcha] Completado.")
+    await emulate_human_behavior(page)
+    return True
+
+
+async def solve_recaptcha(url):
+    logging.info(f"[solve_recaptcha] Iniciando proceso para resolver reCAPTCHA en {url}.")
+    try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False, args=[
                 '--disable-blink-features=AutomationControlled',
                 '--disable-infobars'
             ])
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36",
-                viewport={'width': 1280, 'height': 720}
+                user_agent=USER_AGENT,
+                viewport=VIEWPORT
             )
             page = await context.new_page()
 
-            # Eliminar propiedades que identifican al navegador como controlado por automatización
             await page.add_init_script("""
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined
                         });
                     """)
+            logging.info("[solve_recaptcha] Propiedades de automatización eliminadas.")
+
             await page.goto(url)
+            logging.info(f"[solve_recaptcha] Navegando a {url}.")
 
-            await page.mouse.move(0, 0)
-            await page.mouse.down()
-            await page.mouse.move(100, 100)
-            await page.mouse.up()
+            await emulate_human_behavior(page)
 
-            try:
-                await page.goto(url)
-                success = await self.interact_with_recaptcha(page)
-                if success:
-                    logging.info("El reCAPTCHA fue resuelto exitosamente.")
-                else:
-                    logging.error("Falló la resolución del reCAPTCHA.")
-                return success
-            except Exception as e:
-                logging.error(f"Error al resolver reCAPTCHA: {str(e)}")
-                return False
-            finally:
-                await emulate_human_behavior(page)
+            success = await handle_recaptcha(page)
+            if success:
+                logging.info("[solve_recaptcha] El reCAPTCHA fue resuelto exitosamente.")
+            else:
+                logging.error("[solve_recaptcha] Falló la resolución del reCAPTCHA.")
+            return success
+    except Exception as e:
+        logging.error(f"[solve_recaptcha] Error al resolver reCAPTCHA: {str(e)}")
+        return False
