@@ -1,6 +1,3 @@
-# services/recaptcha_solver.py
-
-import logging
 from services.recaptcha_service import RecaptchaService
 
 class RecaptchaSolver:
