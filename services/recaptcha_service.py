@@ -37,7 +37,7 @@ async def handle_recaptcha(page):
 
     if await is_checkbox_checked(recaptcha_iframe):
         logging.info("[handle_recaptcha] Checkbox ya está marcado.")
-        return
+        return 'Checkbox ya está marcado'
 
     await emulate_human_behavior(page)
     challenge_iframe = await find_challenge_iframe(page)
@@ -57,6 +57,7 @@ async def handle_recaptcha(page):
         raise Exception("Falló el manejo del reCAPTCHA.")
 
     logging.info("[handle_recaptcha] Completado.")
+    return response_text
 
 
 async def solve_recaptcha(url):
@@ -85,13 +86,9 @@ async def solve_recaptcha(url):
 
             await emulate_human_behavior(page)
 
-            try:
-                await handle_recaptcha(page)
-                logging.info("[solve_recaptcha] El reCAPTCHA fue resuelto exitosamente.")
-                return True
-            except Exception as e:
-                logging.error(f"[solve_recaptcha] Error en el manejo del reCAPTCHA: {str(e)}")
-                return False
+            desafio_response = await handle_recaptcha(page)
+            logging.info("[solve_recaptcha] El reCAPTCHA fue resuelto exitosamente.")
+            return f"El reCAPTCHA fue resuelto exitosamente: {desafio_response}"
     except Exception as e:
         logging.error(f"[solve_recaptcha] Error al resolver reCAPTCHA: {str(e)}")
-        return False
+        raise Exception(f"Error al resolver reCAPTCHA: {str(e)}")
