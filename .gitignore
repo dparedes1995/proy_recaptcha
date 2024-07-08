@@ -1,0 +1,3 @@
+# Ignorar directorios de cache de Python y archivos compilados
+**/__pycache__/
+*.pyc
